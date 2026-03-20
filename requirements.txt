@@ -1,0 +1,4 @@
+sounddevice>=0.4.6
+numpy>=1.20.0
+# Optional: for Opus encoding instead of WAV
+opuslib>=3.0.1
