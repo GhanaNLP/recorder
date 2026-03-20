@@ -1,5 +1,4 @@
 # Recorder app outputs
-config.json
 exports/
 progress/
 recordings/
