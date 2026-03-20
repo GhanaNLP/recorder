@@ -8,15 +8,24 @@ Welcome! This tool helps you record audio in your local language for our dataset
 
    Make sure you have Python installed on your computer. You can download it from [python.org](https://www.python.org/).
 
-2. **Setup the App**:
+2. **Clone the Repository**:
 
-   Open your terminal (Command Prompt on Windows or Terminal on Mac) in the project folder and run:
+   First, download the project files to your computer. Open your terminal and run:
+
+   ```
+   git clone https://github.com/GhanaNLP/recorder.git
+   cd recorder
+   ```
+
+3. **Setup the App**:
+
+   Install the necessary dependencies by running the following command inside the project folder:
 
    ```
    pip install -r requirements.txt
    ```
 
-3. **Launch the Recorder**:
+4. **Launch the Recorder**:
 
    Start the application by running:
 
@@ -24,7 +33,7 @@ Welcome! This tool helps you record audio in your local language for our dataset
    python recorder.py
    ```
 
-4. **Enter Your Code**:
+5. **Enter Your Code**:
 
    When the app opens, you will be asked for a **Volunteer Code**. Paste the unique `VOL-...` code provided to you by the project coordinator.
 
