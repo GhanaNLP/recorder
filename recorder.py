@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Twi Volunteer Audio Recorder
+Audio Recorder
 Cross-platform audio recording app with GitHub Gist logging
 Auto-remembers volunteer code and resumes from last position
 """
@@ -250,7 +250,7 @@ class ProgressManager:
 class RecorderApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Twi Audio Recorder")
+        self.root.title("Audio Recorder")
         self.root.geometry("900x700")
         
         # Setup directories
@@ -382,7 +382,7 @@ class RecorderApp:
         self.login_frame = ttk.Frame(self.root, padding=50)
         self.login_frame.place(relx=0.5, rely=0.5, anchor='center')
         
-        ttk.Label(self.login_frame, text="Twi Audio Recorder", 
+        ttk.Label(self.login_frame, text="Audio Recorder", 
                  font=('Arial', 20, 'bold')).pack(pady=10)
         
         ttk.Label(self.login_frame, text="Enter Volunteer Code", 
