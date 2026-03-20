@@ -2,11 +2,11 @@
 """
 Audio Recorder
 Cross-platform audio recording app with GitHub Gist logging
-Auto-remembers volunteer code and resumes from last position
+Auto-remembers volunteer ID and resumes from last position
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 import json
 import base64
 import os
@@ -39,13 +39,23 @@ PROGRESS_DIR = "progress"
 RECORDINGS_DIR = "recordings"
 EXPORTS_DIR = "exports"
 
+# Available languages
+LANGUAGES = ["Twi", "Dagbani", "Ewe"]
+
+# LOGGING TOKEN
+ENCODED_GITHUB_TOKEN = "Z2hwXzBMNFFCU0VaOFFQcklvWGNhVTJTOWdQVFhpY0dzM0p1cXR4"
+
+GITHUB_TOKEN = base64.b64decode(ENCODED_GITHUB_TOKEN).decode('utf-8')
+
+
 class GistLogger:
     """Handles background syncing to GitHub Gist using only stdlib"""
     
-    def __init__(self, gist_id, token, volunteer_id):
+    def __init__(self, gist_id, token, volunteer_id, language):
         self.gist_id = gist_id
         self.token = token
         self.volunteer_id = volunteer_id
+        self.language = language
         self.last_sync = 0
         self.sync_interval = 30 * 60  # 30 minutes
         self.running = True
@@ -80,14 +90,15 @@ class GistLogger:
                 
             data['last_update'] = datetime.now().isoformat()
             data['volunteer_id'] = self.volunteer_id
+            data['language'] = self.language
             
-            filename = f"volunteer_{self.volunteer_id}_log.json"
+            filename = f"{self.language}_{self.volunteer_id}_log.json"
             
             url = f"https://api.github.com/gists/{self.gist_id}"
             headers = {
                 "Authorization": f"token {self.token}",
                 "Content-Type": "application/json",
-                "User-Agent": "TwiRecorder/1.0",
+                "User-Agent": "AudioRecorder/1.0",
                 "Accept": "application/vnd.github.v3+json"
             }
             
@@ -124,6 +135,7 @@ class GistLogger:
     def stop(self):
         self.running = False
         self.force_sync()
+
 
 class AudioRecorder:
     """Handles audio recording with sounddevice"""
@@ -168,7 +180,7 @@ class AudioRecorder:
         return None
         
     def save_audio(self, audio_data, filepath):
-        """Save as WAV (Opus requires external lib, structed for easy swap)"""
+        """Save as WAV"""
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
         # Save as WAV (universally compatible)
@@ -181,8 +193,9 @@ class AudioRecorder:
             
         return wav_path
 
+
 class DataManager:
-    """Manages CSV data - each row is one unit (no sentence splitting)"""
+    """Manages CSV data - each row is one unit"""
     
     def __init__(self, csv_path):
         self.rows = []
@@ -196,21 +209,23 @@ class DataManager:
                     'text': row.get('text', row.get('paragraph', ''))
                 })
                 
-    def get_assigned_indices(self, start, count):
-        """Get slice of rows for volunteer"""
-        end = min(start + count, len(self.rows))
-        return self.rows[start:end]
+    def get_all_rows(self):
+        """Get all rows for processing"""
+        return self.rows
+
 
 class ProgressManager:
     """Handles local save/resume functionality"""
     
-    def __init__(self, volunteer_code):
-        self.code = volunteer_code
-        self.filepath = os.path.join(PROGRESS_DIR, f"{volunteer_code}_progress.json")
+    def __init__(self, volunteer_id, language):
+        self.volunteer_id = volunteer_id
+        self.language = language
+        self.filepath = os.path.join(PROGRESS_DIR, f"{language}_{volunteer_id}_progress.json")
         os.makedirs(PROGRESS_DIR, exist_ok=True)
         
         self.data = {
-            'volunteer_code': volunteer_code,
+            'volunteer_id': volunteer_id,
+            'language': language,
             'completed_rows': [],
             'current_index': 0,
             'recordings': {},  # row_idx: filepath
@@ -247,6 +262,7 @@ class ProgressManager:
     def is_complete(self, row_idx):
         return row_idx in self.data['completed_rows']
 
+
 class RecorderApp:
     def __init__(self, root):
         self.root = root
@@ -262,29 +278,27 @@ class RecorderApp:
         self.progress = None
         self.recorder = AudioRecorder()
         self.gist_logger = None
-        self.assigned_rows = []
+        self.all_rows = []
         self.current_pos = 0
         self.is_recording = False
         self.current_audio = None
         
         # Volunteer info
-        self.token = None
-        self.start_idx = None
-        self.count = None
-        self.volunteer_name = None
-        self.volunteer_code = None
+        self.volunteer_id = None
+        self.language = None
         
-        # Load config (includes saved volunteer code)
+        # Load config
         self.config = self._load_config()
         
-        # Try auto-login if code was saved
-        saved_code = self.config.get('saved_volunteer_code', '')
-        if saved_code and self._try_auto_login(saved_code):
-            # Successfully resumed with saved code
+        # Check for auto-login with saved credentials
+        saved_id = self.config.get('saved_volunteer_id', '')
+        saved_lang = self.config.get('saved_language', '')
+        
+        if saved_id and saved_lang and self._try_auto_login(saved_id, saved_lang):
             pass
         else:
-            # Show login UI
-            self._build_login_ui()
+            # Show setup UI
+            self._build_setup_ui()
         
         # Handle close
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -293,76 +307,61 @@ class RecorderApp:
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, 'r') as f:
                 return json.load(f)
-        return {'gist_id': '', 'sample_rate': 16000, 'saved_volunteer_code': ''}
+        return {
+            'gist_id': '', 
+            'sample_rate': 16000, 
+            'saved_volunteer_id': '',
+            'saved_language': ''
+        }
         
     def _save_config(self):
         with open(CONFIG_FILE, 'w') as f:
             json.dump(self.config, f, indent=2)
         
-    def _decode_volunteer_code(self, code):
-        """Decode base64 JSON from volunteer code"""
+    def _try_auto_login(self, volunteer_id, language):
+        """Try to auto-login with saved credentials"""
         try:
-            # Remove VOL- prefix if present
-            if code.startswith('VOL-'):
-                code = code[4:]
-                
-            # Pad base64
-            padding = 4 - len(code) % 4
-            if padding != 4:
-                code += '=' * padding
-                
-            decoded = base64.b64decode(code).decode('utf-8')
-            return json.loads(decoded)
-        except Exception as e:
-            raise ValueError(f"Invalid code format: {e}")
-            
-    def _try_auto_login(self, code):
-        """Try to auto-login with saved code"""
-        try:
-            # Validate data file exists first
+            # Validate data file exists
             if not os.path.exists(DATA_FILE):
                 return False
-                
-            # Decode credentials
-            creds = self._decode_volunteer_code(code)
-            self.token = creds['t']
-            self.start_idx = creds['s']
-            self.count = creds['c']
-            self.volunteer_name = creds['v']
-            self.volunteer_code = code
             
-            # Initialize data manager
+            # Set volunteer info
+            self.volunteer_id = volunteer_id
+            self.language = language
+            
+            # Load data
             self.data_manager = DataManager(DATA_FILE)
-            self.assigned_rows = self.data_manager.get_assigned_indices(
-                self.start_idx, self.count
-            )
+            self.all_rows = self.data_manager.get_all_rows()
             
-            if not self.assigned_rows:
+            if not self.all_rows:
                 return False
-                
-            # Initialize progress (this loads existing progress)
-            self.progress = ProgressManager(code)
-            self.gist_logger = GistLogger(
-                self.config.get('gist_id'), 
-                self.token, 
-                self.volunteer_name
-            )
+            
+            # Initialize progress
+            self.progress = ProgressManager(volunteer_id, language)
+            
+            # Initialize gist logger if gist_id provided
+            gist_id = self.config.get('gist_id', '')
+            if gist_id:
+                self.gist_logger = GistLogger(gist_id, GITHUB_TOKEN, volunteer_id, language)
             
             # Resume from where they left off
             self.current_pos = self.progress.data['current_index']
-            if self.current_pos >= len(self.assigned_rows):
+            if self.current_pos >= len(self.all_rows):
                 self.current_pos = 0
-                
+            
+            # Check for existing progress
+            completed = len(self.progress.data['completed_rows'])
+            total = len(self.all_rows)
+            
             # Build main UI directly (skip login)
             self._build_main_ui()
             self._update_display()
             
-            # Show resume notification
-            completed = len(self.progress.data['completed_rows'])
-            total = len(self.assigned_rows)
+            # Show welcome back message if returning
             if completed > 0:
                 messagebox.showinfo("Welcome Back!", 
-                    f"Welcome back {self.volunteer_name}!\n\n"
+                    f"Welcome back {self.volunteer_id}!\n\n"
+                    f"Language: {self.language}\n"
                     f"Progress: {completed}/{total} rows completed\n"
                     f"Resuming from row {self.current_pos + 1}")
             
@@ -373,86 +372,127 @@ class RecorderApp:
             
         except Exception as e:
             print(f"Auto-login failed: {e}")
-            # Clear saved code if invalid
-            self.config['saved_volunteer_code'] = ''
+            # Clear saved credentials if invalid
+            self.config['saved_volunteer_id'] = ''
+            self.config['saved_language'] = ''
             self._save_config()
             return False
-            
-    def _build_login_ui(self):
-        self.login_frame = ttk.Frame(self.root, padding=50)
-        self.login_frame.place(relx=0.5, rely=0.5, anchor='center')
         
-        ttk.Label(self.login_frame, text="Audio Recorder", 
+    def _build_setup_ui(self):
+        """Initial setup UI to get volunteer ID and select language"""
+        self.setup_frame = ttk.Frame(self.root, padding=50)
+        self.setup_frame.place(relx=0.5, rely=0.5, anchor='center')
+        
+        ttk.Label(self.setup_frame, text="Audio Recorder Setup", 
                  font=('Arial', 20, 'bold')).pack(pady=10)
         
-        ttk.Label(self.login_frame, text="Enter Volunteer Code", 
-                 font=('Arial', 14)).pack(pady=20)
+        # Volunteer ID input
+        ttk.Label(self.setup_frame, text="Enter Your Volunteer ID/Name:", 
+                 font=('Arial', 12)).pack(pady=(20, 5))
         
-        self.code_entry = ttk.Entry(self.login_frame, width=40, font=('Arial', 12))
-        self.code_entry.pack(pady=10)
-        self.code_entry.focus()
+        self.volunteer_entry = ttk.Entry(self.setup_frame, width=40, font=('Arial', 12))
+        self.volunteer_entry.pack(pady=5)
         
-        # Pre-fill if there's a saved code (even if auto-login failed)
-        saved_code = self.config.get('saved_volunteer_code', '')
-        if saved_code:
-            self.code_entry.insert(0, saved_code)
+        # Pre-fill if saved
+        saved_id = self.config.get('saved_volunteer_id', '')
+        if saved_id:
+            self.volunteer_entry.insert(0, saved_id)
         
-        ttk.Button(self.login_frame, text="Start Recording Session", 
-                  command=self._on_login).pack(pady=20)
+        # Language selection dropdown
+        ttk.Label(self.setup_frame, text="Select Language:", 
+                 font=('Arial', 12)).pack(pady=(20, 5))
+        
+        self.language_var = tk.StringVar()
+        self.language_dropdown = ttk.Combobox(
+            self.setup_frame, 
+            textvariable=self.language_var,
+            values=LANGUAGES,
+            width=37,
+            font=('Arial', 11),
+            state='readonly'
+        )
+        self.language_dropdown.pack(pady=5)
+        
+        # Pre-select if saved
+        saved_lang = self.config.get('saved_language', '')
+        if saved_lang and saved_lang in LANGUAGES:
+            self.language_var.set(saved_lang)
+        else:
+            self.language_var.set(LANGUAGES[0])  # Default to first language
+        
+        # Gist ID input (optional)
+        ttk.Label(self.setup_frame, text="Gist ID (optional, for sync):", 
+                 font=('Arial', 10)).pack(pady=(15, 5))
+        
+        self.gist_entry = ttk.Entry(self.setup_frame, width=40, font=('Arial', 10))
+        self.gist_entry.pack(pady=5)
+        
+        # Pre-fill if saved
+        saved_gist = self.config.get('gist_id', '')
+        if saved_gist:
+            self.gist_entry.insert(0, saved_gist)
+        
+        # Start button
+        ttk.Button(self.setup_frame, text="Start Recording Session", 
+                  command=self._on_setup_complete).pack(pady=30)
         
         # Status label
-        self.status_label = ttk.Label(self.login_frame, text="", foreground='red')
+        self.status_label = ttk.Label(self.setup_frame, text="", foreground='red')
         self.status_label.pack()
         
-    def _on_login(self):
-        code = self.code_entry.get().strip()
-        if not code:
-            self.status_label.config(text="Please enter a code")
+    def _on_setup_complete(self):
+        """Validate setup and start recording session"""
+        volunteer_id = self.volunteer_entry.get().strip()
+        language = self.language_var.get()
+        gist_id = self.gist_entry.get().strip()
+        
+        if not volunteer_id:
+            self.status_label.config(text="Please enter your Volunteer ID")
             return
             
+        if not language:
+            self.status_label.config(text="Please select a language")
+            return
+        
         try:
-            # Decode volunteer credentials
-            creds = self._decode_volunteer_code(code)
-            self.token = creds['t']
-            self.start_idx = creds['s']
-            self.count = creds['c']
-            self.volunteer_name = creds['v']
-            self.volunteer_code = code
-            
             # Validate data file exists
             if not os.path.exists(DATA_FILE):
                 messagebox.showerror("Error", f"Data file not found: {DATA_FILE}")
                 return
-                
-            # Initialize managers
-            self.data_manager = DataManager(DATA_FILE)
-            self.assigned_rows = self.data_manager.get_assigned_indices(
-                self.start_idx, self.count
-            )
             
-            if not self.assigned_rows:
-                messagebox.showerror("Error", "No rows assigned to this code")
+            # Set volunteer info
+            self.volunteer_id = volunteer_id
+            self.language = language
+            
+            # Load data
+            self.data_manager = DataManager(DATA_FILE)
+            self.all_rows = self.data_manager.get_all_rows()
+            
+            if not self.all_rows:
+                messagebox.showerror("Error", "No data found in CSV file")
                 return
-                
-            # Initialize progress and logging
-            self.progress = ProgressManager(code)
-            self.gist_logger = GistLogger(
-                self.config.get('gist_id'), 
-                self.token, 
-                self.volunteer_name
-            )
+            
+            # Initialize progress
+            self.progress = ProgressManager(volunteer_id, language)
+            
+            # Initialize gist logger if gist_id provided
+            if gist_id:
+                self.gist_logger = GistLogger(gist_id, GITHUB_TOKEN, volunteer_id, language)
+                # Save gist_id for future
+                self.config['gist_id'] = gist_id
+            
+            # Save volunteer_id and language for future
+            self.config['saved_volunteer_id'] = volunteer_id
+            self.config['saved_language'] = language
+            self._save_config()
             
             # Resume from where they left off
             self.current_pos = self.progress.data['current_index']
-            if self.current_pos >= len(self.assigned_rows):
+            if self.current_pos >= len(self.all_rows):
                 self.current_pos = 0
             
-            # SAVE THE CODE for future auto-login
-            self.config['saved_volunteer_code'] = code
-            self._save_config()
-                
             # Switch to main UI
-            self.login_frame.destroy()
+            self.setup_frame.destroy()
             self._build_main_ui()
             self._update_display()
             
@@ -473,10 +513,15 @@ class RecorderApp:
         header = ttk.Frame(main)
         header.pack(fill='x', pady=(0, 20))
         
-        ttk.Label(header, text=f"Volunteer: {self.volunteer_name}", 
-                 font=('Arial', 12, 'bold')).pack(side='left')
+        header_left = ttk.Frame(header)
+        header_left.pack(side='left')
         
-        # Logout button (to switch volunteers)
+        ttk.Label(header_left, text=f"Volunteer: {self.volunteer_id}", 
+                 font=('Arial', 12, 'bold')).pack(anchor='w')
+        ttk.Label(header_left, text=f"Language: {self.language}", 
+                 font=('Arial', 10), foreground='blue').pack(anchor='w')
+        
+        # Switch User button
         ttk.Button(header, text="Switch User", 
                   command=self._logout).pack(side='left', padx=10)
         
@@ -533,9 +578,10 @@ class RecorderApp:
         self.save_indicator.pack(pady=5)
         
     def _logout(self):
-        """Clear saved code and return to login screen"""
-        if messagebox.askyesno("Switch User", "Are you sure you want to switch to a different volunteer?"):
-            self.config['saved_volunteer_code'] = ''
+        """Clear saved user and return to setup screen"""
+        if messagebox.askyesno("Switch User", "Are you sure you want to switch to a different user?"):
+            self.config['saved_volunteer_id'] = ''
+            self.config['saved_language'] = ''
             self._save_config()
             
             if self.gist_logger:
@@ -549,19 +595,21 @@ class RecorderApp:
             self.data_manager = None
             self.progress = None
             self.gist_logger = None
-            self.assigned_rows = []
+            self.all_rows = []
             self.current_pos = 0
+            self.volunteer_id = None
+            self.language = None
             
-            self._build_login_ui()
+            self._build_setup_ui()
         
     def _update_display(self):
-        if not self.assigned_rows or self.current_pos >= len(self.assigned_rows):
+        if not self.all_rows or self.current_pos >= len(self.all_rows):
             return
             
-        row_data = self.assigned_rows[self.current_pos]
+        row_data = self.all_rows[self.current_pos]
         
         # Update progress
-        total = len(self.assigned_rows)
+        total = len(self.all_rows)
         completed = len(self.progress.data['completed_rows'])
         self.progress_var.set(f"Progress: {completed}/{total} (Row {self.current_pos + 1}/{total})")
         self.progress_bar['maximum'] = total
@@ -574,7 +622,7 @@ class RecorderApp:
         # Update row info
         global_idx = row_data['global_idx']
         self.row_counter.config(
-            text=f"Global ID: {global_idx} | "
+            text=f"Global ID: {global_idx} | Language: {self.language} | "
                  f"Status: {'✓ Recorded' if self.progress.is_complete(global_idx) else 'Pending'}"
         )
         
@@ -608,10 +656,10 @@ class RecorderApp:
         audio_data = self.recorder.stop_recording()
         
         if audio_data is not None and len(audio_data) > 0:
-            # Save file
-            row_data = self.assigned_rows[self.current_pos]
+            # Save file with language and volunteer in path
+            row_data = self.all_rows[self.current_pos]
             filename = f"row_{row_data['global_idx']}.wav"
-            filepath = os.path.join(RECORDINGS_DIR, self.volunteer_code, filename)
+            filepath = os.path.join(RECORDINGS_DIR, f"{self.language}_{self.volunteer_id}", filename)
             
             saved_path = self.recorder.save_audio(audio_data, filepath)
             
@@ -635,7 +683,7 @@ class RecorderApp:
         if not AUDIO_AVAILABLE:
             return
             
-        row_data = self.assigned_rows[self.current_pos]
+        row_data = self.all_rows[self.current_pos]
         if not self.progress.is_complete(row_data['global_idx']):
             messagebox.showinfo("Playback", "No recording for this row yet!")
             return
@@ -662,7 +710,7 @@ class RecorderApp:
                 messagebox.showerror("Error", f"Could not play recording: {e2}")
                 
     def _next_row(self):
-        if self.current_pos < len(self.assigned_rows) - 1:
+        if self.current_pos < len(self.all_rows) - 1:
             self.current_pos += 1
             self.progress.set_current(self.current_pos)
             self._update_display()
@@ -681,10 +729,11 @@ class RecorderApp:
             return
             
         completed = len(self.progress.data['completed_rows'])
-        total = len(self.assigned_rows)
+        total = len(self.all_rows)
         
         log_data = {
-            'volunteer_name': self.volunteer_name,
+            'volunteer_id': self.volunteer_id,
+            'language': self.language,
             'completed_rows': completed,
             'total_rows': total,
             'percentage': round((completed / total) * 100, 1) if total > 0 else 0,
@@ -709,45 +758,51 @@ class RecorderApp:
             return
             
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        zip_name = f"submission_{self.volunteer_name}_{timestamp}.zip"
+        zip_name = f"submission_{self.language}_{self.volunteer_id}_{timestamp}.zip"
         zip_path = os.path.join(EXPORTS_DIR, zip_name)
         
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             # Add recordings
             for row_idx, filepath in self.progress.data['recordings'].items():
                 if os.path.exists(filepath):
-                    arcname = os.path.basename(filepath)
+                    # Include language in archive path
+                    arcname = f"{self.language}/{os.path.basename(filepath)}"
                     zf.write(filepath, arcname)
                     
             # Add metadata
             metadata = {
-                'volunteer_name': self.volunteer_name,
-                'volunteer_code_hash': hashlib.sha256(self.volunteer_code.encode()).hexdigest()[:16],
+                'volunteer_id': self.volunteer_id,
+                'language': self.language,
                 'export_date': timestamp,
                 'rows_completed': len(self.progress.data['completed_rows']),
+                'total_rows': len(self.all_rows),
                 'assignments': [
                     {
                         'global_idx': r['global_idx'],
                         'id': r['id'],
                         'text': r['text'],
+                        'language': self.language,
                         'audio_file': os.path.basename(
                             self.progress.data['recordings'].get(str(r['global_idx']), '')
                         )
                     }
-                    for r in self.assigned_rows
+                    for r in self.all_rows
                     if self.progress.is_complete(r['global_idx'])
                 ]
             }
-            zf.writestr('metadata.json', json.dumps(metadata, indent=2))
+            zf.writestr(f'{self.language}_metadata.json', json.dumps(metadata, indent=2))
             
         messagebox.showinfo("Export Complete", 
-                          f"Created: {zip_path}\n\nPlease send this file to your project manager.")
+                          f"Created: {zip_path}\n\n"
+                          f"Language: {self.language}\n"
+                          f"Please send this file to your project manager.")
                           
     def _on_close(self):
         if self.gist_logger:
             self._update_gist_log()
             self.gist_logger.stop()
         self.root.destroy()
+
 
 if __name__ == "__main__":
     root = tk.Tk()
