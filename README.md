@@ -33,20 +33,21 @@ Welcome! This tool helps you record audio in your local language for our dataset
    python recorder.py
    ```
 
-5. **Enter Your Code**:
+5. **Select Your Language**:
 
-   When the app opens, you will be asked for a **Volunteer Code**. Paste the unique `VOL-...` code provided to you by the project coordinator.
+   When the app opens, select the language you are recording for (e.g., **Twi**, **Ewe**, or **Dagbani**) from the menu to load the corresponding dataset.
 
 ## How to Record
 
-- **Read the Text**: You will see a paragraph or sentence on the screen.
+- **Read the Text**: You will see a paragraph or sentence on the screen based on your selected language.
 - **Record**: Click the **Record** button and read the text clearly. Use a quiet environment if possible.
 - **Review**: You can play back your recording to make sure it sounds good and there are no loud background noises.
 - **Save & Next**: Once you are satisfied, move to the next sentence. The app saves your progress automatically.
 
 ## Useful Features
 
-- **Resume Anytime**: If you close the app or your computer restarts, you can pick up exactly where you left off by entering the same code.
+- **Resume Anytime**: If you close the app or your computer restarts, simply relaunch and select the same language to pick up exactly where you left off.
+- **Bundled Dataset**: All required text is already included in the repository, so you can start contributing immediately.
 - **Automatic Sync**: Your progress is periodically backed up to our secure logs to ensure no work is lost.
 - **Offline Support**: You can record without an internet connection; the app will sync your progress the next time you are online.
 
