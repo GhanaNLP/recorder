@@ -54,4 +54,4 @@ When you have finished all your assigned recordings:
 - `recordings/`: This folder stores your individual audio clips.
 - `exports/`: This is where your final submission package (`.zip`) will appear.
 
-**Thank you for your contribution to your language community!**
+**Thank you for your contribution to language speech collection for Ghanaian languages!**
