@@ -4,7 +4,7 @@ Welcome! This tool helps you record audio in your local language for our dataset
 
 ## How to Start
 
-Watch video tutorial here: 
+Watch video tutorial here: https://youtu.be/lZnr72CxsRo
 
 1. **Install Python**:
 
