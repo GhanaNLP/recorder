@@ -34,10 +34,15 @@ except ImportError:
 
 # Configuration
 CONFIG_FILE = "config.json"
-DATA_FILE = "data.csv"
+DATA_DIR = "data"          # folder containing language-suffixed CSVs
 PROGRESS_DIR = "progress"
 RECORDINGS_DIR = "recordings"
 EXPORTS_DIR = "exports"
+
+
+def get_data_file(language):
+    """Return path to the CSV for the given language, e.g. data/data_Twi.csv"""
+    return os.path.join(DATA_DIR, f"data_{language}.csv")
 
 # Available languages
 LANGUAGES = ["Twi", "Dagbani", "Ewe"]
@@ -321,8 +326,9 @@ class RecorderApp:
     def _try_auto_login(self, volunteer_id, language):
         """Try to auto-login with saved credentials"""
         try:
-            # Validate data file exists
-            if not os.path.exists(DATA_FILE):
+            # Validate data file exists for this language
+            data_file = get_data_file(language)
+            if not os.path.exists(data_file):
                 return False
             
             # Set volunteer info
@@ -330,7 +336,7 @@ class RecorderApp:
             self.language = language
             
             # Load data
-            self.data_manager = DataManager(DATA_FILE)
+            self.data_manager = DataManager(data_file)
             self.all_rows = self.data_manager.get_all_rows()
             
             if not self.all_rows:
@@ -387,7 +393,7 @@ class RecorderApp:
                  font=('Arial', 20, 'bold')).pack(pady=10)
         
         # Volunteer ID input
-        ttk.Label(self.setup_frame, text="Enter Your Volunteer ID/Name:", 
+        ttk.Label(self.setup_frame, text="Enter Your Name:", 
                  font=('Arial', 12)).pack(pady=(20, 5))
         
         self.volunteer_entry = ttk.Entry(self.setup_frame, width=40, font=('Arial', 12))
@@ -418,7 +424,7 @@ class RecorderApp:
         if saved_lang and saved_lang in LANGUAGES:
             self.language_var.set(saved_lang)
         else:
-            self.language_var.set(LANGUAGES[0])  # Default to first language
+            self.language_var.set('')  # No default — user must actively choose
         
         # Gist ID input
         ttk.Label(self.setup_frame, text="Gist ID (please leave this unchanged):", 
@@ -455,9 +461,14 @@ class RecorderApp:
             return
         
         try:
-            # Validate data file exists
-            if not os.path.exists(DATA_FILE):
-                messagebox.showerror("Error", f"Data file not found: {DATA_FILE}")
+            # Validate data file exists for this language
+            data_file = get_data_file(language)
+            if not os.path.exists(data_file):
+                messagebox.showerror(
+                    "Error",
+                    f"Data file not found for language '{language}':\n{data_file}\n\n"
+                    f"Please add a file named 'data_{language}.csv' inside the 'data/' folder."
+                )
                 return
             
             # Set volunteer info
@@ -465,7 +476,7 @@ class RecorderApp:
             self.language = language
             
             # Load data
-            self.data_manager = DataManager(DATA_FILE)
+            self.data_manager = DataManager(data_file)
             self.all_rows = self.data_manager.get_all_rows()
             
             if not self.all_rows:
