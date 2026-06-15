@@ -34,6 +34,11 @@ Watch video tutorial here: https://youtu.be/lZnr72CxsRo
    ```
    python recorder.py
    ```
+   On `MacBook` if run into `ModuleNotFoundError: No module named '_tkinter'` issue then install
+
+   ```sh
+   brew install python-tk
+   ```
 
 5. **Select Your Language**:
 
